@@ -1,0 +1,274 @@
+# Machine learning example 
+# https://en.wikipedia.org/wiki/Nim
+# author: Gábor Somogyi, 2018.01.13
+
+import sys
+import time
+import random
+
+
+class player :
+    """ Implements a NIM player who knows the rules of the game and makes its decisions based
+    on the previous games played in self-learning mode. Individual game steps are stored in the
+    history lists of the players and knowledge is represented in the brain (global). """
+    
+    def __init__(self) :
+        """ History of a single game is owned by the player. History is a list of board setups."""
+        self.selectedrow, self.selectednum = 0, 0   # results of the latest selections
+        self.history = []
+        return
+    
+    def reset(self) :
+        """ When a new game starts player is either init or reset."""
+        self.selectedrow, self.selectednum = 0, 0   # results of the latest selections
+        self.history = []
+        return
+    
+    def turn(self) :
+        """ Calculates the turn of the player then updates board[] and the history of the player."""
+        global LENROWS, NUMROWS, PWR, board, brain
+        # possible move: in any non zero row 'r' we can remove n=(1..board[r]) stones
+        # remaining number of stones in that row would be s=board[r]-n=(0..board[r]-1)=range(board[r])
+        # all_possible_boards will store all of the possible board configurations after a possible move
+        # all_possible_moves will store the corresponding [r,n] pairs
+        all_possible_boards = []
+        all_possible_moves = []
+        for r in range(NUMROWS) :
+            if board[r]!=0 :
+                for s in range(board[r]):
+                    # possible_board[] stores a possible board setup after selecting r and n
+                    possible_board = []
+                    n = board[r]-s
+                    for i in range(NUMROWS) :
+                        if i!=r : possible_board.append(board[i])
+                        else : possible_board.append(s)
+                    all_possible_boards.append(possible_board)
+                    all_possible_moves.append([r,n])
+        # we search for the max value of all_possible_boards in the brain
+        # we randomly select an [r,n] pair from the optimal choices,
+        # a choice is optimal if the brain stores max value for it among all other possible choices
+        m = max([ get_brain(all_possible_boards[i]) for i in range(len(all_possible_boards)) ])
+
+        # choices having max value in the brain listed and a random choice is made among them
+        selected = random.choice([all_possible_moves[i] for i in range(len(all_possible_boards)) if get_brain(all_possible_boards[i])==m])
+        self.selectedrow = selected[0]
+        self.selectednum = selected[1]
+        board[self.selectedrow] = board[self.selectedrow]-self.selectednum
+
+        # Phyton coding rule: We just want to COPY the current board setup at the end of the history list.
+        # That is why we use list(board) here - othervise we would make history and board identical. 
+                
+        self.history.append(list(board))
+        return
+
+def get_brain(location):
+    """ Get data from brain. We use the brain list as a multi-dimensional array. Example:
+    the board size is 3 rows x 7 stones max. Value for board = [2,5,3] is stored at
+    brain[2*7**0+5*7**1+3*7**2] = brain[184]. The size of the list is 7*7*7 = 7**3.
+    In a 3 dim array this would be same as brain[2,5,3]. """
+    global NUMROWS, PWR, brain
+    return( brain[sum([location[i]*PWR[i] for i in range(NUMROWS)])] )
+
+def inc_brain(location):
+    """ Increments the value stored in the brain for  aspecific board setup."""
+    global NUMROWS, PWR, brain
+    loc = sum(location[i]*PWR[i] for i in range(NUMROWS))
+    brain[loc] = brain[loc]+1
+    return
+
+def dec_brain(location):
+    """ Decrements the value stored in the brain for  aspecific board setup."""
+    global NUMROWS, PWR, brain
+    loc = sum(location[i]*PWR[i] for i in range(NUMROWS))
+    brain[loc] = brain[loc]-1
+    return
+
+def learning(runs):
+    """ Learning is carried out the same way as Arthur Samuel did it with the self
+    learning checkers program. The computer plays as many as 'runs' games against itself
+    based on its probabilistic strategy. All games played are stored temporarily in the
+    players history lists and evaluated by updating the brain. Winner player positions
+    get incremented while looser player positions get decremented in the brain[]. """
+
+    global board, brain, totalruns
+    totalruns = totalruns + runs
+    print("START learning...")
+    start_ = time.time()        # time in seconds from epoch (float)
+
+    a = player()
+    b = player()
+    for i in range(runs):
+        resetgame(board)
+        a.reset()
+        b.reset()
+        while sum(board)!=0 :
+            a.turn()
+            if sum(board) == 0:     # player 'a' lost
+                for i in range(len(a.history)) : dec_brain(a.history[i])
+                for i in range(len(b.history)) : inc_brain(b.history[i])
+            else:
+                b.turn()
+                if sum(board) == 0:     # player 'b' lost
+                    for i in range(len(a.history)) : inc_brain(a.history[i])
+                    for i in range(len(b.history)) : dec_brain(b.history[i])
+        
+        
+    end_ = time.time()
+    delta_ = int((end_-start_)*1000000)
+    print("FINISHED",runs,"games in",delta_,"usec, ",int(round(delta_/runs)),"usec/cycle")
+    return
+
+
+def resetgame(board):
+    """ Initializes the gameboard with random stones in each row.
+    (Take care, board is passed by addr so board will be globally changed)"""
+    for i in range(NUMROWS): board[i] = random.randint(LENROWS//2 , LENROWS-1)
+    return
+
+
+def disprow(stones,stolenstones):
+    """ Returns a string that represents a row of the gameboard for displaying purposes. """
+    global LENROWS
+    STONE = u'\u25cf'           # unicode black circle
+    STOLEN = u'\u25cd'          # unicode circle with vertical fill
+    NOSTONE = u'\u25cc'         # unicode dotted circle
+    
+    disp = ''
+    for i in range(LENROWS):
+        if i in range(stones) : t = STONE
+        elif i in range(stones,stones+stolenstones) : t = STOLEN
+        else : t = NOSTONE
+        if i % 5 == 0:
+            disp = disp + ' ' + t
+        else:
+            disp = disp + t
+    return disp
+
+
+def dispboard(board,r,n):
+    """ Displays a board configuration. """
+    global NUMROWS
+    for i in range(NUMROWS) :
+        if i==r : print(i,disprow(board[i],n))
+        else : print(i,disprow(board[i],0))
+    return
+
+
+def ask(prompt, choices):
+    """ Single character keyboard input + Enter to be selected from choices. """
+    while True:
+        ans = input(prompt)
+        if (ans in choices) and (len(ans)==1):
+            return ans
+
+
+def getnum(prompt,lo,hi):
+    """ Read an int number from the keyboard + Enter in the range lo..hi inclusive. """
+    while True:
+        try:
+            ans = int(input(prompt))
+            if (lo<=ans) and (ans<=hi):
+                return ans
+            else:
+                raise ValueError
+        except ValueError:
+            print('Acceptable range is ',lo,'..',hi,'. Please try again!')
+
+
+def inc(l,d):
+    """ Increments the list 'l' as a counter in base 'LENROWS'.'d' points to
+    the digit we need to start the incrementation with. This recursive function
+    creates a counter that can go through all board configurations. This is
+    used as a pointer to scan the brain[]. """
+    global LENROWS
+    if d==-1 : return
+    l[d]=l[d]+1
+    if l[d]==LENROWS:
+        l[d]=0
+        inc(l,d-1)
+    else : return
+
+# **************************************************************************************
+# *                                     MAIN                                           *
+# **************************************************************************************
+
+print('\n'*20,'\nNIM game - using machine learning')
+print('For details pls visit: https://en.wikipedia.org/wiki/Nim\n')
+
+# program starts here with initialization of global constants (all caps)
+LENROWS = 31                                    # length of rows on the gameboard
+NUMROWS = 3                                     # number of rows
+PWR = [LENROWS**i for i in range(NUMROWS)]      # powers needed for converting
+
+# each position in the brain corresponds to a specific gameboard setup and it has a value in brain
+# the brain is mapped as a NUMROWS dimensional cube, sized LENROWS (aka multi-dimensional array)
+# each position in brain[] corresponds to a possible board setup (some stones in the rows)
+# e.g. row0=4 stones, row1=5 stones, row2=11 stones, lenrows = 15 is mapped to
+# brain[4*15**0+5*15**1+11*15**2] == brain[4*pwr[0]+5*pwr[1]+11*pwr[2]] == brain[2554]
+
+brain = [0] * (LENROWS**NUMROWS)    # an empty brain[] is created
+board = [0] * NUMROWS               # the gameboard is a list: NUMROWS elements, stones in each
+runs = 3                            # number of predefined learning cycles
+totalruns = 0                       # collects the total number of learning curves
+learning(runs)                      # number of cycles, and the "brain" are passed on
+comp = player()                     # instantionates a player against the human
+
+while True:
+    print('\nWhat now?')
+    ans = ask('(R)ules, (P)lay, (L)earn more, (S)how my knowledge or (E)xit ? ','rplse')
+    if ans == 'r':
+        print('\nNim is a mathematical game of strategy in which two players take turns')
+        print('removing objects from distinct heaps. On each turn, a player must remove')
+        print('at least one object, and may remove any number of objects provided they')
+        print('all come from the same heap. The goal of the game is to avoid being the')
+        print('player who must remove the last object.')
+        
+    elif ans == 'p':
+        resetgame(board)        # random numbers of stones in each row
+        r, n = 0, 0             # row and number of stones selected defaults to zero
+        ans = ask('Would you like to start? ','yn')
+        dispboard(board,0,0)
+
+        if ans == 'y':
+            # request the human player's first move
+            r = getnum('\nRow    : ',0,NUMROWS-1)
+            n = getnum('Stones : ',1,board[r])
+            board[r] = board[r]-n
+            dispboard(board,r,n)
+        
+        while sum(board)!=0 :
+            # now comes the computer
+            comp.turn()
+            r = comp.selectedrow
+            n = comp.selectednum
+            print('\nRow    :',r)
+            print('Stones :',n,'  (my move)')
+            dispboard(board,r,n)
+            if sum(board)==0 : print('\nI lost this game, you won. Congratulations.')
+                                
+            else:
+                # now comes the human
+                r = getnum('\nRow    : ',0,NUMROWS-1)
+                while board[r]==0 : r = getnum('\nRow    : ',0,NUMROWS-1)
+                n = getnum('Stones : ',1,board[r])
+                board[r] = board[r]-n
+                dispboard(board,r,n)
+                if sum(board)==0 : print('\nI won, you lost this game. Sorry.')
+        
+    elif ans == 'l':
+        print('\nTotal learning cycles so far:',totalruns)
+        learning(getnum('How many learning games shall I play? ',1,100000))
+        
+    elif ans == 's':
+        print("\nShowing the preferred states (proved to be good in more than 1% of the cases):")
+        board = [0] * NUMROWS   # board[] is used as a pointer in scanning the brain[]
+        for i in range(len(brain)):
+            if get_brain(board)>int(totalruns//100) : print(board,':',get_brain(board))
+            inc(board,NUMROWS-1)
+                
+    elif ans == 'e' or ans == 'x':
+        print('\nBye.','\n'*5)
+        sys.exit()
+
+
+
